@@ -1,0 +1,505 @@
+// attic_graphic_v_01.ino
+// Floris Wouterlood March 5 2016
+// This is for the public domain
+// thanks to everybody who made this possible 
+// sketch for Arduino Uno / Arduino nano 
+// display on a 3.5 320x480 color TFT screen with 0x9481 controller
+//
+// this sketch monitors a bunch of Dallas DS18B20 temperature sensors
+// via a one-wire bus on pin 13 
+// pull up resistor for the DS18B20 bus 4.6k
+// currently 8 Dallas probes - number can be expanded
+//  
+// and four DHT11 relative humidity sensors - we ignore here DHT11 temperature sensing
+// on nano pins 10-11-12-19 (pin A5 on nano) (SD control pins on the TFT shield not connected to the arduino board) 
+// pull up resistor for DHT11's 10K ohm
+// TFT control via pins A0-A4 and pins D2 thru D9 
+// uses mcu_friend's mcufriend_kbv library
+//
+// don't use pins 0 and 1 on the nano (TX and RX) - these interfere with serial monitor
+// pin 13 for DHTs gave problems 
+//
+// sensor connectivity summary
+// nano pin 13 for DS18B20s = pin A5
+// nano pins 10-11-12-19 (=A5) borrowed for DHT11s from SD control
+//
+// here we go!
+
+  #define LCD_CS A3               // Chip Select goes to Analog 3
+  #define LCD_CD A2               // Command/Data goes to Analog 2
+  #define LCD_WR A1               // LCD Write goes to Analog 1
+  #define LCD_RD A0               // LCD Read goes to Analog 0
+  #define LCD_RESET A4            // Can alternately just connect to Arduino's reset pin
+
+  #include <SPI.h>               // spi interface library for TFT
+  #include <Adafruit_GFX.h>      // tft display hardware-specific library
+  #include <MCUFRIEND_kbv.h>     // tft display hardware-specific library
+
+// ========== assign human-readable names to some common 16-bit color values =========================
+  #define	BLACK   0x0000
+  #define	BLUE    0x001F
+  #define	RED     0xF800
+  #define	GREEN   0x07E0
+  #define CYAN    0x07FF
+  #define MAGENTA 0xF81F
+  #define YELLOW  0xFFE0
+  #define WHITE   0xFFFF
+
+  int cursorx=0;                 // cursor positioning x coordinate
+  int cursory=0;                 // cursor positioning y coordinate
+
+    
+// ========== Dallas DS18B20 ========================================================================= 
+// single wire bus on pin 13 on the Arduino 
+   #define ONE_WIRE_BUS 13
+
+// ========== setup the TFT ==========================================================================
+   MCUFRIEND_kbv tft;
+
+
+// ========== setup a oneWire bus ====================================================================
+   OneWire oneWire(ONE_WIRE_BUS);
+
+// ========== pass oneWire reference to Dallas Temperature ===========================================
+   DallasTemperature sensors(&oneWire);
+
+// ========== probe addresses ========================================================================
+   DeviceAddress probe_01 = { 0x28, 0xFF, 0x5A, 0x76, 0xA3, 0x15, 0x04, 0xA1 };   
+   DeviceAddress probe_02 = { 0x28, 0xFF, 0x27, 0x33, 0xA3, 0x15, 0x04, 0x41 };   
+   DeviceAddress probe_03 = { 0x28, 0xFF, 0x52, 0x68, 0xA3, 0x15, 0x03, 0x31 };   
+   DeviceAddress probe_04 = { 0x28, 0xFF, 0xC0, 0x6C, 0xA3, 0x15, 0x01, 0xB7 };   
+   DeviceAddress probe_05 = { 0x28, 0xFF, 0xF7, 0x31, 0xA3, 0x15, 0x04, 0x18 };      
+   DeviceAddress probe_06 = { 0x28, 0xFF, 0x1C, 0x76, 0xA3, 0x15, 0x04, 0xD4 };   
+   DeviceAddress probe_07 = { 0x28, 0xFF, 0xEA, 0x43, 0xA3, 0x15, 0x04, 0x27 };
+   DeviceAddress probe_08 = { 0x28, 0xFF, 0x96, 0x74, 0xA3, 0x15, 0x04, 0xA5 };     
+
+
+// ========== physical location of the probes ========================================================
+// probe_01 probe on 'cold' return pipe to CH heater located in the attic
+// probe_02 probe op 'hot' pipe fgrom CH heater located in the attic
+// probe_03 probe on Exendis Gridfit inverter case
+// probe_04 probe ambient temperature attic
+// probe_05 outside temperature back dormer
+// probe_06 temperature outlet solar heater storage tank
+// probe_07 temperature attic office
+// probe 08 temperature OK4E inverter nr 84374 - for 120 Wp MSX paneel on front dormer
+
+// ========== number of temperature sensors found ====================================================
+   int numberOfDevices;
+
+// DHT11 relative humidity sensors  - mounted in pairs to dampen inaccuracy
+// mounted outside the home 
+/*   DHT sens1(10,DHT11);   //sensor one on pin 12 of nano arduino  - DHT11 measuring inside rel hum
+   DHT sens2(11,DHT11);   //sensor two on pin 11 of nano arduino  - DHT11 measuring inside rel hum
+
+// mounted inside the home 
+   DHT sens3(12,DHT11);   //sensor one on pin 10 of nano arduino  - DHT11 measuring outside rel hum
+   DHT sens4(19,DHT11);   //sensor two on pin A5 of nano arduino  - DHT11 measuring outside rel hum
+*/
+
+// variables used for control logic ==================================================================
+   float Temp1, Temp2, Temp3, Temp4;                //  storage DS18B20 variables temperature sensors
+   float Temp5, Temp6, Temp7, Temp8;                //  storage DS18B20 variables temperature sensors
+   float DHT11_h1, DHT11_h2, DHT11_h3, DHT11_h4;    //  storage variables DHT11 relative humidity values
+   float humidity_int=0;                            //  storage variable for averaged relative humidity
+   float humidity_ext=0;                            //  storage variable for averaged relative humidity
+
+void setup(void) { 
+  
+   uint16_t g_identifier;
+   Serial.begin(9600);
+   Serial.println("---- attic_graphic_v_01.ino -----");
+   Serial.println("English version  -  Public Domain");  
+   Serial.println("Floris Wouterlood - March 5, 2016");
+   Serial.println("");
+   
+   // Start up the Dallas library
+   Serial.println("starting one wire sensors");
+   Serial.print("initializing Temperature Control Library, version ");
+   Serial.println(DALLASTEMPLIBVERSION);
+   sensors.begin();
+
+   // locate DS18B20 devices on the oneWire bus
+   Serial.println("");
+   Serial.print("....... found ");
+   Serial.print(sensors.getDeviceCount(), DEC);
+   Serial.println(" DS18B20 devices ..........");
+   Serial.println("");
+ 
+   // set the resolution to 10 bit (good enough?)
+   sensors.setResolution(probe_01, 10);
+   sensors.setResolution(probe_02, 10);
+   sensors.setResolution(probe_03, 10);
+   sensors.setResolution(probe_04, 10); 
+   sensors.setResolution(probe_05, 10); 
+   sensors.setResolution(probe_06, 10);
+   sensors.setResolution(probe_07, 10);
+   sensors.setResolution(probe_08, 10);
+   
+   // provide identification TFT controller to library  
+   g_identifier = 0x9481;  // this if for the 3.5 inch display ILI9341 controller
+   tft.begin(g_identifier);
+
+// ========== initialization message TFT screen ======================================================
+   tft.fillScreen(BLUE);
+   tft.setCursor(10, 10);
+   tft.setTextColor(WHITE);  tft.setTextSize(1);
+   tft.println("initializing. . . . . . .");
+   delay(500);
+   tft.fillScreen(BLUE);
+
+// =========== temperature block section outlining ===================================================
+
+   // draw line block 
+   tft.drawLine(20,5,300,5,0xFFFF);     // color white  hor
+   tft.drawLine(20,5,20,40,0xFFFF);     // color white  vert
+   tft.drawLine(300,5,300,40,0xFFFF);   // color white  vert
+   tft.drawLine(20,40,300,40,0xFFFF);   // color white  hor 
+    
+   tft.setTextColor(YELLOW);    
+   tft.setTextSize(3);
+   tft.setCursor(10, 10);
+   tft.println(" temperatures");
+
+   // magenta line under block section
+   tft.drawLine(20,45,300,45,0xF81F);  // color magenta
+   tft.drawLine(20,47,300,47,0xF81F);  // color magenta
+ 
+   tft.setTextSize(2);
+   tft.setTextColor(GREEN);  
+   tft.setCursor(10, 70);   
+   tft.println(" outside: ");
+   cursorx=280;
+   cursory=70;
+   centigrade();
+  
+   tft.setCursor(10, 90);   
+   tft.println(" inside: ");
+   cursorx=280; cursory=90; 
+   centigrade();   
+     
+   tft.setCursor(10, 110);     
+   tft.println(" attic: ");
+   cursorx=280; cursory=110; 
+   centigrade();  
+   
+   tft.setCursor(10, 140);     
+   tft.println(" CH hot water: ");
+   cursorx=280; cursory=140; 
+   centigrade();  
+     
+   tft.setCursor(10, 160);     
+   tft.println(" CH return: ");
+   cursorx=280; cursory=160; 
+   centigrade();  
+
+   tft.setCursor(10, 180);     
+   tft.println(" solar heater: ");
+   cursorx=280; cursory=180; 
+   centigrade();  
+     
+   tft.setCursor(10, 200);     
+   tft.println(" inverters ");
+
+// inverters section of this block === may be expanded with more inverters ==========================   
+
+   tft.setCursor(10, 220);     
+   tft.println("  Exendis: ");
+   cursorx=280; cursory=220; 
+   centigrade(); 
+
+   tft.setCursor(10, 240);     
+   tft.println("  OK4 84374(MSX):");
+   cursorx=280; cursory=240; 
+   centigrade();  
+
+    
+// ========== humidity block section outlining =======================================================
+
+   // draw line block 
+   tft.drawLine(20,295,300,295,0xFFFF);     // color white hor 
+   tft.drawLine(20,330,300,330,0xFFFF);     // color white vert
+   tft.drawLine(20,295,20,330,0xFFFF);      // color white vert
+   tft.drawLine(300,295,300,330,0xFFFF);    // color white hor  
+
+   tft.setTextColor(YELLOW);    
+   tft.setTextSize(3);
+   tft.setCursor(10, 300);
+   tft.println(" humidity");
+
+   // line under block
+   tft.drawLine(20,340,300,340,0xF81F);   // color magenta
+   tft.drawLine(20,343,300,343,0xF81F);   // color magenta
+
+   tft.setTextSize(2);
+   tft.setTextColor(GREEN);  
+   tft.setCursor(10, 360);   
+   tft.println(" outside: ");
+   tft.setCursor(280, 360);  
+   tft.println("%");    
+   tft.setCursor(10, 380);   
+   tft.println(" inside: ");
+   tft.setCursor(280, 380);  
+   tft.println("%");   
+
+
+// ========== design and version block outlining and content =========================================
+ 
+   tft.setTextSize(1);
+   tft.setTextColor(YELLOW); 
+   
+   // draw line block 
+   tft.drawLine(20,455,300,455,0xF81F);   // color magenta hor
+   tft.drawLine(20,455,20,473,0xF81F);    // color magenta vert   
+   tft.drawLine(300,455,300,473,0xF81F);  // color magenta vert     
+   tft.drawLine(290,455,290,473,0xF81F);  // color magenta vert  
+   tft.drawLine(20,473,300,473,0xF81F);   // color magenta hor 
+
+   tft.setCursor(20,460);   
+   tft.println(" FW / March 5, 2016 ");  
+   delay(4000);
+
+}
+
+
+void loop (){
+
+// ========== read DHT11s   ==========================================================================
+// original instruction lines
+   // 32 bytes is maximum payload
+   char outBuffer[32]= "";
+   char floatBuf1[10];
+   char floatBuf2[10];
+   float h, t;
+ 
+// ========== read DHT11s ===========================================================================      
+
+   // 32 bytes is maximum payload
+   // read DHT11 sensors from buffer
+      DHT11_h1= sens1.readHumidity(); //Serial.print ("sensor DHT11_h1 intern:  "); Serial.println (DHT11_h1);
+      DHT11_h2= sens2.readHumidity(); //Serial.print ("sensor DHT11_h2 intern:  "); Serial.println (DHT11_h2);
+      
+      DHT11_h3= sens3.readHumidity();// Serial.print ("sensor DHT11_h3 extern:  "); Serial.println (DHT11_h3);
+      DHT11_h4= sens4.readHumidity(); //Serial.print ("sensor DHT11_h4 extern:  "); Serial.println (DHT11_h4);
+      
+   // calculate averages
+      humidity_int = ((DHT11_h1+DHT11_h2)/2); humidity_ext = ((DHT11_h3+DHT11_h4)/2);    
+
+      
+// ========== read DS18B20s===========================================================================
+   sensors.requestTemperatures();
+ 
+// load variables with sensor values 
+   Temp1 = sensors.getTempC(probe_01);
+   Temp2 = sensors.getTempC(probe_02);
+   Temp3 = sensors.getTempC(probe_03);
+   Temp4 = sensors.getTempC(probe_04); 
+   Temp5 = sensors.getTempC(probe_05);
+   Temp6 = sensors.getTempC(probe_06);  
+   Temp7 = sensors.getTempC(probe_07);
+   Temp8 = sensors.getTempC(probe_08);      
+
+//========== first display DS18B20 readings on serial monitor and ====================================
+
+// probe 05 = outside temperature back dormer
+      Serial.println("===============================================");  
+      Serial.print("outside temperature: ..................  ");
+      Serial.print(Temp5,1);
+      Serial.println(" *C ");
+      cursorx=220; cursory=68;
+      sticker();
+  
+      if (Temp5<10){
+          tft.setCursor(235,70);     
+          }
+      else {  
+          tft.setCursor(225,70);
+          }
+      tft.setTextColor(YELLOW); 
+      tft.setTextSize(2);          
+      tft.println(Temp5,1);
+      blip();  
+      delay(1000);
+      
+// probe 07 = air temperature attic office       
+      Serial.print("my own little office: ................. ");
+      Serial.print(Temp7,1);
+      Serial.println(" *C "); 
+      cursorx=220; cursory=88;
+      sticker();   
+      tft.setCursor(225,90);
+      tft.setTextColor(YELLOW); 
+      tft.setTextSize(2);          
+      tft.println(Temp7,1);
+      blip();
+      delay(1000); 
+
+// probe 07 = air temperature attic office       
+      Serial.print("attic: ................................ ");
+      Serial.print(Temp4,1);
+      Serial.println(" *C "); 
+      cursorx=220; cursory=108;
+      sticker();
+      tft.setCursor(225,110);
+      tft.setTextColor(YELLOW); 
+      tft.setTextSize(2);          
+      tft.println(Temp4,1);
+      blip();  
+      delay(1000); 
+   
+// probe 02 = hot CH water attic sensor       
+      Serial.print("central heating hot water temp: ....... ");
+      Serial.print(Temp2,1);
+      Serial.println(" *C "); 
+      cursorx=220; cursory=138;
+      sticker(); 
+      tft.setCursor(225,140);
+      tft.setTextColor(YELLOW); 
+      tft.setTextSize(2);          
+      tft.println(Temp2,1);
+      blip(); 
+      delay(1000);
+
+// probe 01 = hot CH water return attic sensor
+      Serial.print("central heating return temp: .......... "); 
+      Serial.print(Temp1,1);
+      Serial.println(" *C"); 
+      cursorx=220; cursory=158;
+      sticker(); 
+      tft.setCursor(225,160);
+      tft.setTextColor(YELLOW); 
+      tft.setTextSize(2);          
+      tft.println(Temp1,1);
+      blip(); 
+      delay(1000);  
+
+// probe 05 = temperature outlet on solar heater hot water tank
+      Serial.print("solar thermal storage tank ............ ");
+      Serial.print(Temp6,1);
+      Serial.println(" *C "); 
+      cursorx=220; cursory=178;
+      sticker();  
+      tft.setCursor(225,180);
+      tft.setTextColor(YELLOW); 
+      tft.setTextSize(2);          
+      tft.println(Temp6,1);
+      blip();
+      delay(1000);
+  
+// probe 03 = temperature case Exendis Gridfit inverter       
+      Serial.print("Exendis case temperatuur: ............. ");
+      Serial.print(Temp3,1);
+      Serial.println(" *C "); 
+      cursorx=220; cursory=218;
+      sticker(); 
+      tft.setCursor(225,220);
+      tft.setTextColor(YELLOW); 
+      tft.setTextSize(2);          
+      tft.println(Temp3,1);
+      blip();  
+      delay(1000);
+
+// probe 08 = temperature case OK4E nr 84374 of MSX 120 solar panel front dormer       
+      Serial.print("OK4E 84374 (MSX) case temperature: .... ");
+      Serial.print(Temp8,1);
+      Serial.println(" *C "); 
+      cursorx=220; cursory=238;
+      sticker(); 
+      tft.setCursor(225,240);
+      tft.setTextColor(YELLOW); 
+      tft.setTextSize(2);          
+      tft.println(Temp8,1);
+      blip();  
+      delay(1000); 
+
+ // serial monitor part  
+
+      Serial.println("===============================================");  
+      Serial.println("inside relative humidity sensors:");  
+      Serial.print("sensor 1: ");
+      Serial.print(DHT11_h1,0);
+      Serial.println (" %");    
+
+      Serial.print("sensor 2: ");
+      Serial.print(DHT11_h2,0);
+      Serial.println (" %");        
+
+      Serial.print("average relative humidity inside: ...... ");
+      Serial.print(humidity_int,0);
+      Serial.println(" %");
+      Serial.println("===============================================");   
+
+      Serial.println ("outside relative humidity sensors:");  
+      Serial.print("sensor 1: ");
+      Serial.print(DHT11_h3,0);
+      Serial.println (" %");    
+
+      Serial.print("sensor 2: ");
+      Serial.print(DHT11_h4,0);
+      Serial.println (" %");        
+      Serial.print("average relative humidity outside: ..... ");
+      Serial.print (humidity_ext,0); 
+      Serial.println (" %");  
+      Serial.println(" ");
+      Serial.println("===============================================");   
+      
+      cursorx=220; cursory=360;
+      sticker();
+      tft.setCursor(240,360);
+      tft.setTextColor(YELLOW); 
+      tft.setTextSize(2);          
+      tft.println(humidity_ext,0);
+      blip();  
+      delay(500);
+      
+      cursorx=220; cursory=380;
+      sticker();
+      tft.setCursor(240,380);
+      tft.setTextColor(YELLOW); 
+      tft.setTextSize(2);          
+      tft.println(humidity_int,0); 
+      blip();  
+      delay(1000);    
+
+}
+
+// ========== subroutines ============================================================================
+
+
+void centigrade (){  // centigrade subroutine 
+   tft.setCursor(cursorx,cursory); 
+   tft.setTextSize(1);
+   tft.println("o");
+   tft.setCursor((cursorx+10),cursory); 
+   tft.setTextSize(2);
+   tft.println("C");
+}
+
+
+void sticker (){  // erases readings displayed previous cycle previous
+  
+       tft.fillRect(cursorx,cursory,55,20,0x001F); // blue   
+   //  tft.fillRect(cursorx,cursory,55,20,0xF800); // red for testing  
+   //  tft.fillRect(cursorx,cursory,55,20,0xF81F); // magenta fot testing   
+}
+
+
+void blip (){ // shows a blinking 'activity' blip in the footer area, right 
+ 
+    cursorx=293;
+    cursory=460;
+    tft.setTextSize(1);
+
+    tft.setTextColor(YELLOW); 
+    tft.setCursor(cursorx,cursory); 
+    tft.println(char(177));
+    delay(500); 
+    tft.setTextColor(BLUE); 
+    tft.setCursor(cursorx,cursory); 
+    tft.println(char(177));
+     
+    tft.setTextSize(2);
+  
+}
+
+

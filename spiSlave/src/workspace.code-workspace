@@ -1,0 +1,28 @@
+{
+	"folders": [
+		{
+			"path": "../../LCD/LCD"
+		},
+		{
+			"name": "spiMaster",
+			"path": "../../spiMaster"
+		},
+		{
+			"name": "spiSlave",
+			"path": ".."
+		},
+		{
+			"name": "SPISlavepromini",
+			"path": "../../../Dokumenty/PlatformIO/Projects/SPISlavepromini"
+		},
+		{
+			"name": "LCD20x4",
+			"path": "../../LCD20x4"
+		},
+		{
+			"name": "LCD20x4SlaveProMini",
+			"path": "../../../Dokumenty/PlatformIO/Projects/LCD20x4SlaveProMini"
+		}
+	],
+	"settings": {}
+}

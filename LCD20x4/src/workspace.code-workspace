@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "../../../SPI"
+		},
+		{
+			"name": "SPISlavepromini",
+			"path": "../../../Dokumenty/PlatformIO/Projects/SPISlavepromini"
+		},
+		{
+			"name": "LCD20x4",
+			"path": ".."
+		}
+	],
+	"settings": {}
+}

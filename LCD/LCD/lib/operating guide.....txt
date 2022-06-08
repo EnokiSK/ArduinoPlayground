@@ -1,0 +1,7 @@
+1) first installed all three libraries in your sketch ....sketch> include library>add zip file
+2) run calculator code .....( code also given in word doc )
+
+note : if  tft.begin(0x9341);  // if it is not work try for 9325 ,9328,7575,8347,8357
+
+
+for any query pls contact : rohan 8237521311 
